@@ -7,77 +7,47 @@ const BadRequestError = require('../errors/BadRequestError');
 const ForbiddenError = require('../errors/ForbiddenError');
 
 // все
+
 module.exports.getMovie = (req, res, next) => {
   Movie.find({ owner: req.user._id })
-    .then((movies) => res.send(movies))
-    .catch((err) => next(err));
+    .then((movies) => {
+      res.send(movies);
+    })
+    .catch(next);
 };
 
 // создание
 module.exports.createMovie = (req, res, next) => {
-  const {
-    country,
-    director,
-    duration,
-    year,
-    description,
-    image,
-    trailerLink,
-    nameRU,
-    nameEN,
-    thumbnail,
-    movieId,
-  } = req.body;
-  Movie.create({
-    country,
-    director,
-    duration,
-    year,
-    description,
-    image,
-    trailerLink,
-    nameRU,
-    nameEN,
-    thumbnail,
-    movieId,
-    owner: req.user._id,
-  })
+  Movie.create({ ...req.body, owner: req.user._id })
     .then((movie) => {
-      if (movie) {
-        res.status(200).send(movie);
-      } else {
-        throw new NotFoundError('Что-то пошло не так..');
-      }
+      res.send(movie);
     })
     .catch((err) => {
-      if (err.name === 'ValidationError') {
-        next(
-          new BadRequestError('Переданы некорректные данные'),
-        );
+      if (err.name === 'ValidationError' || err.name === 'CastError') {
+        next(new BadRequestError('Переданы некорректные данные'));
+        return;
       }
+
       next(err);
     });
 };
 
 // удаление
+
 module.exports.deleteMovie = (req, res, next) => {
-  const ownerId = req.user._id;
-  Movie.findById(req.params.movieId)
-    .then((movie) => {
-      if (movie) {
-        if (!movie.owner.equals(ownerId)) {
-          throw new ForbiddenError('Вы не можете удалить чужой фильм');
-        }
-        return Movie.findByIdAndRemove(req.params.movieId).then(() => {
-          res.status(200).send(movie);
-        });
-      }
-      throw new NotFoundError('Задан несуществующий _id фильма');
+  const userId = req.user._id;
+  const { movieId } = req.params;
+
+  Movie.findById(movieId)
+    .orFail(() => {
+      throw new NotFoundError('Фильм с указанным _id не найден');
     })
-    .catch((err) => {
-      if (err.name === 'CastError') {
-        next(new BadRequestError('Задан несуществующий _id фильма'));
+    .then((movie) => {
+      if (movie.owner.toString() === userId) {
+        return Movie.findByIdAndRemove(movieId)
+          .then((deletedMovie) => res.send(deletedMovie));
       }
-      next(err);
-    });
+      throw new ForbiddenError('У вас нет доступа, вы не можете удалить чужой фильм');
+    })
+    .catch(next);
 };
